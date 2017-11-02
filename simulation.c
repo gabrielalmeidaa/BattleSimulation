@@ -17,17 +17,20 @@
 #define TEAM_B 1
 #define NUM_ARCHERS 1
 #define NUM_ARROWS 1
-#define NUM_ASSISTS 1
-#define INITIAL_STORAGE_COUNT 10
+#define NUM_ASSISTS 2
+#define INITIAL_STORAGE_COUNT 2
 
 #define RECHARGE_TIME 10
 #define HITTING_CHANCE 40
-#define MAX_DAMAGE 10
+#define MAX_DAMAGE 100
 #define DELIVER_ARROWS_INTERVAL 10
 #define PRODUCE_ARROW_INTERVAL 10
+#define INVADE_TIME 20
+#define DELAY_TIME 5
 
 int archers_life[2][NUM_ARCHERS];
 int archers_arrows[2][NUM_ARCHERS];
+int on_storage_A = 0, on_storage_B = 0;
 
 
 pthread_t archersA[NUM_ARCHERS], archersB[NUM_ARCHERS];
@@ -37,6 +40,10 @@ pthread_mutex_t archer_life_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t archer_arrows_mutex_A = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t archer_arrows_mutex_B = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t on_storage_A_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t on_storage_B_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t can_enter_A = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t can_enter_B = PTHREAD_MUTEX_INITIALIZER;
 
 pthread_cond_t archer_cond_A = PTHREAD_COND_INITIALIZER;
 pthread_cond_t archer_cond_B = PTHREAD_COND_INITIALIZER;
@@ -48,21 +55,19 @@ sem_t idle_on_storage_A, idle_on_storage_B;
 
 
 
-
-
 void produceArrows(int team, int id){
   int aux;
 
   sleep(PRODUCE_ARROW_INTERVAL);
   if(team == TEAM_A){
-    printf(ANSI_COLOR_BLUE "[ASSISTENTE %d] adicionou um conjunto de flechas no armazém..." ANSI_COLOR_RESET "\n", id);
+    printf(ANSI_COLOR_BLUE "\n[ASSISTENTE %d] adicionou um conjunto de flechas no armazém..." ANSI_COLOR_RESET "\n", id);
     sem_post(&storage_A);
     sem_getvalue(&storage_A, &aux);
     printf("Semáforo A: %d\n", aux);
   }
 
   else {
-    printf(ANSI_COLOR_GREEN "[ASSISTENTE %d] adicionou um conjunto de flechas no armazém..." ANSI_COLOR_RESET "\n", id);
+    printf(ANSI_COLOR_GREEN "\n[ASSISTENTE %d] adicionou um conjunto de flechas no armazém..." ANSI_COLOR_RESET "\n", id);
     sem_post(&storage_B);
     sem_getvalue(&storage_B, &aux);
     printf("Semáforo B: %d\n", aux);
@@ -76,13 +81,13 @@ void searchAndHelpArcher(int team, int id){
   sleep(DELIVER_ARROWS_INTERVAL);
 
   if(team == TEAM_A){
-    sem_wait(&storage_A);
-      sem_getvalue(&storage_A, &aux);
-      printf("Semáforo A: %d\n", aux);
+
+    if(sem_trywait(&storage_A) == 0){
+
       for(int i = 0; i < NUM_ARCHERS; i++ ) {
         pthread_mutex_lock(&archer_arrows_mutex_A);
           if(archers_arrows[team][i] <= 0){
-            printf(ANSI_COLOR_BLUE "[ASSISTENTE %d] irá entregar %d flechas para Arqueiro %d..." ANSI_COLOR_RESET "\n", id, NUM_ARROWS, i );
+            printf(ANSI_COLOR_BLUE "\n[ASSISTENTE %d] entregou %d flechas para [ARQUEIRO %d]..." ANSI_COLOR_RESET "\n", id, NUM_ARROWS, i );
             archers_arrows[team][i] += NUM_ARROWS;
             pthread_cond_broadcast(&archer_cond_A);
             pthread_mutex_unlock(&archer_arrows_mutex_A);
@@ -90,17 +95,22 @@ void searchAndHelpArcher(int team, int id){
           }
         pthread_mutex_unlock(&archer_arrows_mutex_A);
       }
+    }
 
+    else {
+      printf(ANSI_COLOR_BLUE "\n[ASSISTENTE %d] tentou auxiliar ARQUEIRO porém não haviam flechas... Irá fabricar flechas." ANSI_COLOR_RESET "\n", id);
+      produceArrows(TEAM_A, id);
+      searchAndHelpArcher(TEAM_A, id);
+    }
   }
 
   else{
-    sem_wait(&storage_B);
-      sem_getvalue(&storage_B, &aux);
-      printf("Semáforo B: %d\n", aux);
+
+    if(sem_trywait(&storage_B) == 0){
       for(int i = 0; i < NUM_ARCHERS; i++ ) {
         pthread_mutex_lock(&archer_arrows_mutex_B);
           if(archers_arrows[team][i] <= 0){
-            printf(ANSI_COLOR_GREEN "[ASSISTENTE %d] irá entregar %d flechas para Arqueiro %d..." ANSI_COLOR_RESET "\n", id, NUM_ARROWS, i );
+            printf(ANSI_COLOR_GREEN "\n[ASSISTENTE %d] entregou %d flechas para [ARQUEIRO %d]..." ANSI_COLOR_RESET "\n", id, NUM_ARROWS, i );
             archers_arrows[team][i] += NUM_ARROWS;
             pthread_cond_broadcast(&archer_cond_B);
             pthread_mutex_unlock(&archer_arrows_mutex_B);
@@ -108,7 +118,13 @@ void searchAndHelpArcher(int team, int id){
           }
         pthread_mutex_unlock(&archer_arrows_mutex_B);
       }
+    }
 
+    else {
+      printf(ANSI_COLOR_GREEN "\n[ASSISTENTE %d] tentou auxiliar ARQUEIRO porém não haviam flechas... Irá fabricar flechas." ANSI_COLOR_RESET "\n", id);
+      produceArrows(TEAM_B, id);
+      searchAndHelpArcher(TEAM_B, id);
+    }
   }
 
 }
@@ -122,49 +138,51 @@ void* assistFunctionA(void* array){
   int action = 0;
 
   while(1){
-    printf(ANSI_COLOR_BLUE "\n\n[ASSISTENTE %d] irá realizar nova ação!" ANSI_COLOR_RESET "\n\n", id );
-    action = rand() % 2;
+    sleep(DELAY_TIME);
+    action = rand() % 3;
 
 
-    if(action == 0){
-        printf(ANSI_COLOR_BLUE "[ASSISTENTE %d] irá produzir flechas..." ANSI_COLOR_RESET "\n", id );
+    if(action == 1){
+        printf(ANSI_COLOR_BLUE "\n[ASSISTENTE %d] irá produzir flechas..." ANSI_COLOR_RESET "\n", id );
         produceArrows(team, id);
     }
 
-    else if(action == 1){
-      printf(ANSI_COLOR_BLUE "[ASSISTENTE %d] entrou em Idle..." ANSI_COLOR_RESET "\n", id );
-      sem_post(&idle_on_storage_A);
+    else if(action == 0){
 
-        pthread_mutex_lock(&archer_arrows_mutex_A);
-          pthread_cond_broadcast(&archer_cond_A);
-          pthread_cond_wait(&assist_cond_A, &archer_arrows_mutex_A);
-        pthread_mutex_unlock(&archer_arrows_mutex_A);
+      pthread_mutex_lock(&on_storage_A_mutex);
+        on_storage_A += 1;
+        if(on_storage_A == 1 ){ pthread_mutex_lock(&can_enter_A); }
+      pthread_mutex_unlock(&on_storage_A_mutex);
 
-      sem_wait(&idle_on_storage_A);
+      pthread_mutex_lock(&archer_arrows_mutex_A);
+        printf(ANSI_COLOR_BLUE "\n[ASSISTENTE %d] entrou em Idle..." ANSI_COLOR_RESET "\n", id );
+        pthread_cond_broadcast(&archer_cond_A);
+        pthread_cond_wait(&assist_cond_A, &archer_arrows_mutex_A);
+      pthread_mutex_unlock(&archer_arrows_mutex_A);
 
-      // sem_getvalue(&storage_A, &sem_val);
-      //
-      // while(sem_val == 0){
-      //   printf("[ASSISTENTE %d] acordou: valor do semáforo: %d \n",id, sem_val);
-      //   printf("[ASSISTENTE %d] irá produzir flechas...\n", id);
-      //   produceArrows(team, id);
-      //   sem_getvalue(&storage_A, &sem_val);
-      // }
+      pthread_mutex_lock(&on_storage_A_mutex);
+        on_storage_A -= 1;
+        if(on_storage_A == 0) {pthread_mutex_unlock(&can_enter_A);}
+      pthread_mutex_unlock(&on_storage_A_mutex);
 
-      printf(ANSI_COLOR_BLUE "[ASSISTENTE %d] irá auxiliar um arqueiro..." ANSI_COLOR_RESET "\n", id );
+      printf(ANSI_COLOR_BLUE "\n[ASSISTENTE %d] irá auxiliar um arqueiro..." ANSI_COLOR_RESET "\n", id );
       searchAndHelpArcher(team, id);
 
     }
 
     else if(action == 2){
-      printf(ANSI_COLOR_BLUE "[ASSISTENTE %d] irá invadir o armazém adversário..." ANSI_COLOR_RESET "\n", id );
+      printf(ANSI_COLOR_BLUE "\n[ASSISTENTE %d] irá invadir o armazém adversário..." ANSI_COLOR_RESET "\n", id );
+      sleep(INVADE_TIME);
 
-      if (sem_trywait(&idle_on_storage_B) != 0) {
-        if (sem_trywait(&storage_B) == 0) { // TEM PERMISSÂO
-          sem_wait(&storage_B);
-          printf(ANSI_COLOR_BLUE "[ASSISTENTE %d] retirou um conjunto de flechas do armazém inimigo..." ANSI_COLOR_RESET "\n", id );
+      pthread_mutex_lock(&can_enter_B);
+        if(sem_trywait(&storage_B) == 0){
+          printf(ANSI_COLOR_BLUE "\n[ASSISTENTE %d] invadiu o armazém adversário e retirou um conjunto de flechas..." ANSI_COLOR_RESET "\n", id );
         }
-      }
+
+        else{
+            printf(ANSI_COLOR_BLUE "\n[ASSISTENTE %d] invadiu o armazém adversário porém não havia nada para retirar..." ANSI_COLOR_RESET "\n", id );
+        }
+      pthread_mutex_unlock(&can_enter_B);
 
     }
 
@@ -180,33 +198,51 @@ void* assistFunctionB(void* array){
   int action = 0;
 
   while(1){
-    printf(ANSI_COLOR_GREEN "\n\n[ASSISTENTE %d] irá realizar nova ação!" ANSI_COLOR_RESET "\n\n", id );
-    action = rand() %2;
+    sleep(DELAY_TIME);
+
+    action = rand() % 3;
 
 
-    if(action == 0){
-      printf(ANSI_COLOR_GREEN "[ASSISTENTE %d] irá produzir flechas..." ANSI_COLOR_RESET "\n", id );
+    if(action == 1){
+      printf(ANSI_COLOR_GREEN "\n[ASSISTENTE %d] irá produzir flechas..." ANSI_COLOR_RESET "\n", id );
       produceArrows(team, id);
     }
 
-    else if(action == 1){
-      printf(ANSI_COLOR_GREEN "[ASSISTENTE %d] entrou em Idle..." ANSI_COLOR_RESET "\n", id );
+    else if(action == 0){
+
+      pthread_mutex_lock(&on_storage_B_mutex);
+        on_storage_B += 1;
+        if(on_storage_B == 1 ){ pthread_mutex_lock(&can_enter_B); }
+      pthread_mutex_unlock(&on_storage_B_mutex);
+
       pthread_mutex_lock(&archer_arrows_mutex_B);
+        printf(ANSI_COLOR_GREEN "\n[ASSISTENTE %d] entrou em Idle..." ANSI_COLOR_RESET "\n", id );
         pthread_cond_broadcast(&archer_cond_B);
         pthread_cond_wait(&assist_cond_B, &archer_arrows_mutex_B);
       pthread_mutex_unlock(&archer_arrows_mutex_B);
 
-      // sem_getvalue(&storage_B, &sem_val);
-      //
-      // while(sem_val == 0){
-      //   printf("Assistente acordou: valor do semáforo: %d \n", sem_val);
-      //   printf("assistente vai produzir flechas...\n");
-      //   produceArrows(team,id);
-      //   sem_getvalue(&storage_B, &sem_val);
-      // }
+      pthread_mutex_lock(&on_storage_B_mutex);
+        on_storage_B -= 1;
+        if(on_storage_B == 0 ) { pthread_mutex_unlock(&can_enter_B); }
+      pthread_mutex_unlock(&on_storage_B_mutex);
 
-      printf(ANSI_COLOR_GREEN "[ASSISTENTE %d] irá auxiliar um arqueiro..." ANSI_COLOR_RESET "\n", id );
+      printf(ANSI_COLOR_GREEN "\n[ASSISTENTE %d] irá auxiliar um arqueiro..." ANSI_COLOR_RESET "\n", id );
       searchAndHelpArcher(team, id);
+    }
+
+    else if(action == 2){
+      printf(ANSI_COLOR_GREEN "\n[ASSISTENTE %d] irá invadir o armazém adversário..." ANSI_COLOR_RESET "\n", id );
+      sleep(INVADE_TIME);
+
+      pthread_mutex_lock(&can_enter_A);
+          if(sem_trywait(&storage_A) == 0){
+            printf(ANSI_COLOR_GREEN "\n[ASSISTENTE %d] invadiu o armazém adversário e retirou um conjunto de flechas..." ANSI_COLOR_RESET "\n", id );
+          }
+
+          else{
+              printf(ANSI_COLOR_GREEN "\n[ASSISTENTE %d] invadiu o armazém adversário porém não havia nada para retirar..." ANSI_COLOR_RESET "\n", id );
+          }
+      pthread_mutex_unlock(&can_enter_A);
     }
   }
 
@@ -231,10 +267,10 @@ void shoot(int team, int id){
   if(team == TEAM_A) enemy_team = TEAM_B; else enemy_team = TEAM_A;
 
   if(team == TEAM_A){
-    printf(ANSI_COLOR_BLUE "[ARQUEIRO - Time: %d, Id: %d, Vida: %d] atirou em um inimigo..."ANSI_COLOR_RESET " \n", team, id, archers_life[team][id]);
+    printf(ANSI_COLOR_BLUE "[ARQUEIRO %d, Vida: %d] atirou em um inimigo..."ANSI_COLOR_RESET " \n", id, archers_life[team][id]);
   }
   else{
-    printf(ANSI_COLOR_GREEN "[ARQUEIRO - Time: %d, Id: %d, Vida: %d] atirou em um inimigo...." ANSI_COLOR_RESET " \n", team, id, archers_life[team][id]);
+    printf(ANSI_COLOR_GREEN "[ARQUEIRO %d, Vida: %d] atirou em um inimigo...." ANSI_COLOR_RESET " \n", id, archers_life[team][id]);
   }
 
   if (rand() % 100 < HITTING_CHANCE) {
@@ -254,9 +290,9 @@ void shoot(int team, int id){
 
   else {
     if (team == TEAM_A)
-      printf(ANSI_COLOR_BLUE "[ARQUEIRO - Time: %d, Id: %d, Vida: %d] errou." ANSI_COLOR_RESET "\n", team, id, archers_life[team][id] );
+      printf(ANSI_COLOR_BLUE "[ARQUEIRO %d, Vida: %d] errou." ANSI_COLOR_RESET "\n", id, archers_life[team][id] );
     else
-      printf(ANSI_COLOR_GREEN "[ARQUEIRO - Time: %d, Id: %d, Vida: %d] errou." ANSI_COLOR_RESET "\n", team, id, archers_life[team][id] );
+      printf(ANSI_COLOR_GREEN "[ARQUEIRO %d, Vida: %d] errou." ANSI_COLOR_RESET "\n", id, archers_life[team][id] );
   }
 
 }
@@ -270,7 +306,7 @@ void* archerFunctionA(void* array){
 
     pthread_mutex_lock(&archer_arrows_mutex_A);
       while(archers_arrows[team][id] <= 0){
-        printf(ANSI_COLOR_BLUE "[ARQUEIRO - Id: %d, Vida: %d] está sem flechas. Esperando recarga..." ANSI_COLOR_RESET "\n", id, archers_life[team][id] );
+        printf(ANSI_COLOR_BLUE "[ARQUEIRO %d, Vida: %d] está sem flechas. Esperando recarga..." ANSI_COLOR_RESET "\n", id, archers_life[team][id] );
         pthread_cond_signal(&assist_cond_A);
         pthread_cond_wait(&archer_cond_A, &archer_arrows_mutex_A);
       }
@@ -296,7 +332,7 @@ void* archerFunctionB(void* array){
 
     pthread_mutex_lock(&archer_arrows_mutex_B);
       while(archers_arrows[team][id] <= 0){
-        printf(ANSI_COLOR_GREEN "[ARQUEIRO - Id: %d, Vida: %d] está sem flechas. Esperando recarga..." ANSI_COLOR_RESET "\n", id, archers_life[team][id] );
+        printf(ANSI_COLOR_GREEN "[ARQUEIRO %d, Vida: %d] está sem flechas. Esperando recarga..." ANSI_COLOR_RESET "\n", id, archers_life[team][id] );
         pthread_cond_signal(&assist_cond_B);
         pthread_cond_wait(&archer_cond_B, &archer_arrows_mutex_B);
       }
@@ -324,8 +360,10 @@ void initialize(){
 
   sem_init(&storage_A, 0, INITIAL_STORAGE_COUNT);
   sem_init(&storage_B, 0, INITIAL_STORAGE_COUNT);
-  sem_init(&idle_on_storage_A, 0, 0);
-  sem_init(&idle_on_storage_B, 0, 0);
+  if ( pthread_mutex_init( &on_storage_A_mutex, NULL) != 0 )
+    printf( "mutex init failed\n" );
+    if ( pthread_mutex_init( &can_enter_A, NULL) != 0 )
+    printf( "mutex init failed\n" );
 
 
 }
