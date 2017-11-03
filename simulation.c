@@ -16,8 +16,8 @@
 #define TEAM_A 0
 #define TEAM_B 1
 #define NUM_ARCHERS 1
-#define NUM_ARROWS 1
-#define NUM_ASSISTS 2
+#define NUM_ARROWS 5
+#define NUM_ASSISTS 1
 #define INITIAL_STORAGE_COUNT 2
 
 #define RECHARGE_TIME 10
@@ -31,9 +31,11 @@
 int archers_life[2][NUM_ARCHERS];
 int archers_arrows[2][NUM_ARCHERS];
 int on_storage_A = 0, on_storage_B = 0;
+int team_won;
 
 
 pthread_t archersA[NUM_ARCHERS], archersB[NUM_ARCHERS];
+pthread_t closingThread[1];
 pthread_t assistA[NUM_ASSISTS], assistB[NUM_ASSISTS];
 
 pthread_mutex_t archer_life_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -50,9 +52,23 @@ pthread_cond_t archer_cond_B = PTHREAD_COND_INITIALIZER;
 pthread_cond_t assist_cond_A = PTHREAD_COND_INITIALIZER;
 pthread_cond_t assist_cond_B = PTHREAD_COND_INITIALIZER;
 
+sem_t closing;
 sem_t storage_A, storage_B;
 sem_t idle_on_storage_A, idle_on_storage_B;
 
+
+int checkAllDead(int team){
+  int count = 0;
+
+    for(int i = 0; i < NUM_ARCHERS; i++){
+      if(archers_life[team][i] <= 0) count++;
+    }
+
+    if(count == NUM_ARCHERS){
+      sem_post(&closing);
+      if(team == TEAM_A) team_won = TEAM_B; else team_won = TEAM_A;
+    }
+}
 
 
 void produceArrows(int team, int id){
@@ -86,7 +102,7 @@ void searchAndHelpArcher(int team, int id){
 
       for(int i = 0; i < NUM_ARCHERS; i++ ) {
         pthread_mutex_lock(&archer_arrows_mutex_A);
-          if(archers_arrows[team][i] <= 0){
+          if(archers_arrows[team][i] <= 0 && archers_life[team][id] > 0){
             printf(ANSI_COLOR_BLUE "\n[ASSISTENTE %d] entregou %d flechas para [ARQUEIRO %d]..." ANSI_COLOR_RESET "\n", id, NUM_ARROWS, i );
             archers_arrows[team][i] += NUM_ARROWS;
             pthread_cond_broadcast(&archer_cond_A);
@@ -177,6 +193,10 @@ void* assistFunctionA(void* array){
       pthread_mutex_lock(&can_enter_B);
         if(sem_trywait(&storage_B) == 0){
           printf(ANSI_COLOR_BLUE "\n[ASSISTENTE %d] invadiu o armazém adversário e retirou um conjunto de flechas..." ANSI_COLOR_RESET "\n", id );
+          sem_post(&storage_A);
+          int aux1;
+          sem_getvalue(&storage_B, &aux1);
+          printf("Semáforo B: %d\n", aux1);
         }
 
         else{
@@ -237,6 +257,10 @@ void* assistFunctionB(void* array){
       pthread_mutex_lock(&can_enter_A);
           if(sem_trywait(&storage_A) == 0){
             printf(ANSI_COLOR_GREEN "\n[ASSISTENTE %d] invadiu o armazém adversário e retirou um conjunto de flechas..." ANSI_COLOR_RESET "\n", id );
+            sem_post(&storage_B);
+            int aux1;
+            sem_getvalue(&storage_A, &aux1);
+            printf("Semáforo A: %d\n", aux1);
           }
 
           else{
@@ -253,9 +277,11 @@ void isArcherAlive(int team, int id){
     if( archers_life[team][id] <= 0){
       printf(ANSI_COLOR_RED "\n\nArqueiro do time %d, id: %d morreu" ANSI_COLOR_RESET "\n\n", team, id );
       if(team == TEAM_A){
+        checkAllDead(team);
         pthread_cancel(archersA[id]);
       }
       else {
+        checkAllDead(team);
         pthread_cancel(archersB[id]);
       }
     }
@@ -360,11 +386,26 @@ void initialize(){
 
   sem_init(&storage_A, 0, INITIAL_STORAGE_COUNT);
   sem_init(&storage_B, 0, INITIAL_STORAGE_COUNT);
-  if ( pthread_mutex_init( &on_storage_A_mutex, NULL) != 0 )
-    printf( "mutex init failed\n" );
-    if ( pthread_mutex_init( &can_enter_A, NULL) != 0 )
-    printf( "mutex init failed\n" );
+  sem_init(&closing, 0, 0);
 
+}
+
+void *closingFunct(){
+
+  sem_wait(&closing);
+
+  for(int i = 0; i < NUM_ARCHERS; i++){
+    if(archersA[i]) pthread_cancel(archersA[i]);
+    if(archersB[i]) pthread_cancel(archersB[i]);
+  }
+
+  for(int i = 0; i < NUM_ASSISTS; i++){
+    if(assistA[i]) pthread_cancel(assistA[i]);
+    if(assistB[i]) pthread_cancel(assistB[i]);
+  }
+
+  printf("\n\n\nTIME %d GANHOU\n\n\n", team_won );
+  pthread_exit(0);
 
 }
 
@@ -373,6 +414,8 @@ int main(){
   srand(time(NULL));
 
   initialize();
+
+  pthread_create(&closingThread[0], NULL, closingFunct, (void*) NULL);
 
   for (int i = 0; i < NUM_ASSISTS ; i++) {
     array = (int *) malloc(2 * sizeof(int));
@@ -402,8 +445,6 @@ int main(){
     pthread_create(&archersB[i], NULL, archerFunctionB , (void *) array);
   }
 
-  while(1){
-
-  }
+  pthread_join(closingThread[0], NULL);
 
 }
