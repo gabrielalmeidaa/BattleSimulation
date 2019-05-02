@@ -1,18 +1,18 @@
-#Projeto de Programação Concorrente
+### Projeto de Programação Concorrente
 Aluno: Gabriel Almeida Campos.
 Matrícula: 15/0009887
-##Descrição
+#### Descrição
 O projeto é uma simulação de batalha de 2 times de arqueiros. Cada time possui **N** arqueiros, uma equipe auxiliar de **M** pessoas, um Armazém e uma Pilha de Materiais. Os Arqueiros permancem em um campo, lutando entre si, enquanto os assistentes realizam outras ações. A simulação acaba quando todos os arqueiros de um time forem derrotados.
 
-##Regras
+#### Regras
 Existe um conjunto de regras para cada entidade do projeto.
 
-###Arqueiros
+##### Arqueiros
 Cada arqueiro possui um aljave de flechas com determinada quantidade e um número de vida. Realizam as seguintes ações:
 * Atirar flechas
 	* Quando estiver sem flechas, pedem assistência e se escondem _(sleep)_.
 
-###Assistentes
+##### Assistentes
 Os assistentes podem realizar entre as seguintes tarefas, determinadas aleatóriamente:
 * Produzir flechas.
 * Invadir o Armazém inimigo para roubar flechas.
